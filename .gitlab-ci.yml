@@ -9,25 +9,47 @@ stages:
 variables:
   TF_ROOT: "terraform"
 
-# -----------------------------
+# -----------------------
 # VALIDATE STAGE
-# -----------------------------
+# -----------------------
 
 terraform_validate:
   stage: validate
-  image: hashicorp/terraform:latest
+  image:
+    name: hashicorp/terraform:latest
+    entrypoint: [""]
   script:
     - cd $TF_ROOT
     - terraform init -input=false
     - terraform fmt -check
     - terraform validate
-  artifacts:
-    paths:
-      - terraform/
+
+terraform_lint:
+  stage: validate
+  image:
+    name: ghcr.io/terraform-linters/tflint:latest
+    entrypoint: [""]
+  script:
+    - cd $TF_ROOT
+    - tflint
+
+docker_validate:
+  stage: validate
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker compose config
+
+# -----------------------
+# PLAN STAGE
+# -----------------------
 
 terraform_plan:
   stage: plan
-  image: hashicorp/terraform:latest
+  image:
+    name: hashicorp/terraform:latest
+    entrypoint: [""]
   script:
     - cd $TF_ROOT
     - terraform init -input=false
@@ -36,14 +58,16 @@ terraform_plan:
     paths:
       - terraform/tfplan
 
-# -----------------------------
+# -----------------------
 # PROVISION STAGE
-# -----------------------------
+# -----------------------
 
 terraform_apply:
   stage: provision
-  image: hashicorp/terraform:latest
   when: manual
+  image:
+    name: hashicorp/terraform:latest
+    entrypoint: [""]
   script:
     - cd $TF_ROOT
     - terraform init -input=false
@@ -55,9 +79,9 @@ terraform_apply:
       - terraform/server_ip.txt
       - terraform/ssh_key.pem
 
-# -----------------------------
+# -----------------------
 # DEPLOY STAGE
-# -----------------------------
+# -----------------------
 
 deploy_directus:
   stage: deploy
@@ -65,7 +89,7 @@ deploy_directus:
   dependencies:
     - terraform_apply
   script:
-    - apk add --no-cache openssh-client bash curl
+    - apk add --no-cache openssh-client curl bash
     - chmod 600 terraform/ssh_key.pem
     - SERVER_IP=$(cat terraform/server_ip.txt)
     - |
@@ -83,9 +107,9 @@ deploy_directus:
       docker compose up -d"
     - sleep 60
 
-# -----------------------------
+# -----------------------
 # TEST STAGE
-# -----------------------------
+# -----------------------
 
 health_check:
   stage: test
@@ -108,14 +132,31 @@ capture_homepage:
     paths:
       - directus_homepage.html
 
-# -----------------------------
+generate_report:
+  stage: test
+  image: alpine:latest
+  dependencies:
+    - terraform_apply
+  script:
+    - SERVER_IP=$(cat terraform/server_ip.txt)
+    - echo "# Deployment Report" > deployment_report.md
+    - echo "Server IP: $SERVER_IP" >> deployment_report.md
+    - echo "Pipeline ID: $CI_PIPELINE_ID" >> deployment_report.md
+    - echo "Status: SUCCESS" >> deployment_report.md
+  artifacts:
+    paths:
+      - deployment_report.md
+
+# -----------------------
 # CLEANUP STAGE
-# -----------------------------
+# -----------------------
 
 terraform_destroy:
   stage: cleanup
-  image: hashicorp/terraform:latest
   when: manual
+  image:
+    name: hashicorp/terraform:latest
+    entrypoint: [""]
   script:
     - cd $TF_ROOT
     - terraform init -input=false
